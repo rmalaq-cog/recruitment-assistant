@@ -1,0 +1,8 @@
+crewai==1.15.22
+fastapi
+uvicorn
+pydantic-settings
+PyYAML
+python-multipart
+pdfplumber
+python-docx

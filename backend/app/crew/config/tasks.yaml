@@ -1,0 +1,25 @@
+research_candidates:
+  description: >
+    Extract structured candidate profiles from the provided candidate materials. Preserve source snippets for important claims, mark uncertainty, and avoid protected-class inference.
+  expected_output: >
+    JSON array of CandidateProfile objects with candidate_id, label, name, headline, skills, education, certifications, projects, employers, links, evidence, and uncertainty_flags.
+  output_file: project-context/2.build/logs/researcher-output.json
+
+evaluate_candidates:
+  description: >
+    Evaluate each CandidateProfile against the normalized job criteria. Apply the same required and preferred criteria to every candidate.
+  expected_output: >
+    JSON array of CandidateEvaluation objects with criteria matches, strengths, gaps, risks, confidence, fit_score, and follow_up_questions.
+  output_file: project-context/2.build/logs/evaluator-output.json
+  context:
+    - research_candidates
+
+recommend_shortlist:
+  description: >
+    Generate a recruiter-facing ranked shortlist from validated candidate evaluations and guardrail results. Label recommendations as requiring human review.
+  expected_output: >
+    ShortlistRecommendation JSON with ranked_candidates, rationale, missing_information, interview_prompts, guardrail_summary, and human_review_notice.
+  output_file: project-context/2.build/logs/recommender-output.json
+  context:
+    - research_candidates
+    - evaluate_candidates
