@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Recruitment Assistant Workbench</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">CrewAI Recruitment</p>
+          <h1>Recruiter Workbench</h1>
+        </div>
+        <div class="status-strip" aria-live="polite">
+          <span id="statusDot" class="status-dot idle"></span>
+          <span id="statusText">Ready</span>
+        </div>
+      </header>
+
+      <section class="workflow-grid" aria-label="Recruitment workflow">
+        <form id="roleForm" class="panel role-panel">
+          <div class="panel-heading">
+            <span class="step-index">01</span>
+            <div>
+              <h2>Role Intake</h2>
+              <p>Job criteria</p>
+            </div>
+          </div>
+
+          <label>
+            Role title
+            <input id="roleTitle" name="roleTitle" type="text" value="Backend Engineer" required>
+          </label>
+
+          <label>
+            Job description
+            <textarea id="jobDescription" name="jobDescription" rows="7" required>Required: Python, FastAPI, SQL. Preferred: Docker, React. Build APIs and data workflows for hiring teams.</textarea>
+          </label>
+
+          <div class="split-fields">
+            <label>
+              Required criteria
+              <textarea id="requiredCriteria" rows="5">Python
+FastAPI
+SQL</textarea>
+            </label>
+            <label>
+              Preferred criteria
+              <textarea id="preferredCriteria" rows="5">Docker
+React</textarea>
+            </label>
+          </div>
+        </form>
+
+        <section class="panel candidate-panel">
+          <div class="panel-heading">
+            <span class="step-index">02</span>
+            <div>
+              <h2>Candidate Inputs</h2>
+              <p>Paste profiles</p>
+            </div>
+          </div>
+
+          <div id="candidateList" class="candidate-list"></div>
+
+          <div class="action-row">
+            <button id="addCandidate" class="secondary-button" type="button">Add candidate</button>
+            <button id="runAnalysis" class="primary-button" type="button">Run analysis</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="results-grid" aria-label="Analysis output">
+        <section class="panel comparison-panel">
+          <div class="panel-heading compact">
+            <span class="step-index">03</span>
+            <div>
+              <h2>Candidate Comparison</h2>
+              <p id="comparisonMeta">No run yet</p>
+            </div>
+          </div>
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Candidate</th>
+                  <th>Fit</th>
+                  <th>Confidence</th>
+                  <th>Strengths</th>
+                  <th>Gaps</th>
+                  <th>Decision</th>
+                </tr>
+              </thead>
+              <tbody id="comparisonRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside class="panel evidence-panel">
+          <div class="panel-heading compact">
+            <span class="step-index">04</span>
+            <div>
+              <h2>Evidence</h2>
+              <p id="evidenceMeta">Select a row</p>
+            </div>
+          </div>
+          <div id="evidenceContent" class="evidence-content empty-state">Run an analysis to inspect source snippets, risks, and interview prompts.</div>
+        </aside>
+      </section>
+
+      <section class="panel export-panel">
+        <div class="panel-heading compact">
+          <span class="step-index">05</span>
+          <div>
+            <h2>Shortlist Export</h2>
+            <p>Human review required</p>
+          </div>
+        </div>
+        <textarea id="exportOutput" rows="10" readonly></textarea>
+        <div class="action-row end">
+          <button id="copyExport" class="secondary-button" type="button">Copy export</button>
+        </div>
+      </section>
+    </main>
+
+    <template id="candidateTemplate">
+      <article class="candidate-card">
+        <div class="candidate-card-header">
+          <label>
+            Candidate label
+            <input class="candidate-label" type="text" required>
+          </label>
+          <button class="icon-button remove-candidate" type="button" aria-label="Remove candidate">x</button>
+        </div>
+        <label>
+          Candidate material
+          <textarea class="candidate-text" rows="6" required></textarea>
+        </label>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
