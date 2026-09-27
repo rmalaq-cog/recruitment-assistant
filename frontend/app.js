@@ -1,7 +1,9 @@
 const state = {
   candidates: [],
   selectedCandidateId: null,
-  results: []
+  results: [],
+  runId: null,
+  apiBaseUrl: localStorage.getItem("recruitmentAssistantApiBaseUrl") || "http://localhost:8000"
 };
 
 const candidateList = document.querySelector("#candidateList");
@@ -13,10 +15,17 @@ const comparisonMeta = document.querySelector("#comparisonMeta");
 const evidenceMeta = document.querySelector("#evidenceMeta");
 const evidenceContent = document.querySelector("#evidenceContent");
 const exportOutput = document.querySelector("#exportOutput");
+const apiBaseUrlInput = document.querySelector("#apiBaseUrl");
 
 document.querySelector("#addCandidate").addEventListener("click", () => addCandidate());
 document.querySelector("#runAnalysis").addEventListener("click", runAnalysis);
 document.querySelector("#copyExport").addEventListener("click", copyExport);
+apiBaseUrlInput.value = state.apiBaseUrl;
+apiBaseUrlInput.addEventListener("change", () => {
+  state.apiBaseUrl = apiBaseUrlInput.value.trim().replace(/\/+$/, "") || "http://localhost:8000";
+  apiBaseUrlInput.value = state.apiBaseUrl;
+  localStorage.setItem("recruitmentAssistantApiBaseUrl", state.apiBaseUrl);
+});
 
 addCandidate({
   label: "Alex Example",
@@ -52,12 +61,14 @@ function addCandidate(seed = {}) {
   candidateList.appendChild(node);
 }
 
-function runAnalysis() {
+async function runAnalysis() {
   const required = readLines("#requiredCriteria");
   const preferred = readLines("#preferredCriteria");
   const activeCandidates = state.candidates.filter((candidate) => candidate.label.trim() && candidate.text.trim());
+  const roleTitle = document.querySelector("#roleTitle").value.trim();
+  const jobDescription = document.querySelector("#jobDescription").value.trim();
 
-  if (!document.querySelector("#roleTitle").value.trim() || !document.querySelector("#jobDescription").value.trim()) {
+  if (!roleTitle || !jobDescription) {
     setStatus("error", "Missing role details");
     return;
   }
@@ -67,51 +78,61 @@ function runAnalysis() {
     return;
   }
 
-  setStatus("running", "Analyzing");
-  window.setTimeout(() => {
-    state.results = activeCandidates
-      .map((candidate) => analyzeCandidate(candidate, required, preferred))
-      .sort((left, right) => right.fitScore - left.fitScore)
-      .map((result, index) => ({ ...result, rank: index + 1 }));
+  setStatus("running", "Creating job");
+  document.querySelector("#runAnalysis").disabled = true;
+  try {
+    const job = await requestJson("/jobs", {
+      method: "POST",
+      body: {
+        title: roleTitle,
+        description: jobDescription,
+        must_have_skills: required,
+        nice_to_have_skills: preferred
+      }
+    });
+
+    setStatus("running", "Saving criteria");
+    const updatedJob = await requestJson(`/jobs/${job.id}/criteria`, {
+      method: "PUT",
+      body: {
+        criteria: {
+          required,
+          preferred,
+          disqualifying: [],
+          responsibilities: []
+        }
+      }
+    });
+
+    setStatus("running", "Analyzing");
+    const run = await requestJson("/runs", {
+      method: "POST",
+      body: {
+        job_id: updatedJob.id,
+        candidates: activeCandidates.map((candidate) => ({
+          id: candidate.id,
+          label: candidate.label.trim(),
+          source_type: "text",
+          text: candidate.text.trim()
+        })),
+        options: {
+          include_markdown_export: true,
+          allow_public_url_fetch: false
+        }
+      }
+    });
+
+    state.runId = run.run_id;
+    state.results = mapRunResults(run);
     state.selectedCandidateId = state.results[0]?.id || null;
     renderResults();
-    setStatus("complete", "Completed");
-  }, 250);
-}
-
-function analyzeCandidate(candidate, required, preferred) {
-  const searchable = candidate.text.toLowerCase();
-  const requiredMatches = required.filter((criterion) => matchesCriterion(searchable, criterion));
-  const preferredMatches = preferred.filter((criterion) => matchesCriterion(searchable, criterion));
-  const requiredGaps = required.filter((criterion) => !requiredMatches.includes(criterion));
-  const preferredGaps = preferred.filter((criterion) => !preferredMatches.includes(criterion));
-  const totalWeight = Math.max(required.length * 2 + preferred.length, 1);
-  const fitScore = Math.round(((requiredMatches.length * 2 + preferredMatches.length) / totalWeight) * 100);
-  const snippets = candidate.text
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 4);
-
-  return {
-    id: candidate.id,
-    label: candidate.label,
-    rank: 0,
-    fitScore,
-    confidence: fitScore >= 75 ? "high" : fitScore >= 45 ? "medium" : "low",
-    strengths: [...requiredMatches, ...preferredMatches],
-    gaps: [...requiredGaps, ...preferredGaps],
-    evidence: snippets,
-    interviewPrompts: [...requiredGaps, ...preferredGaps]
-      .slice(0, 3)
-      .map((gap) => `Describe recent hands-on experience with ${gap}.`),
-    decision: "needs_more_information"
-  };
-}
-
-function matchesCriterion(searchable, criterion) {
-  const terms = criterion.toLowerCase().match(/[a-z0-9+#.]{3,}/g) || [];
-  return terms.some((term) => searchable.includes(term));
+    await renderServerExport();
+    setStatus(run.status === "completed" ? "complete" : "error", formatStatus(run.status));
+  } catch (error) {
+    setStatus("error", error.message || "Analysis failed");
+  } finally {
+    document.querySelector("#runAnalysis").disabled = false;
+  }
 }
 
 function renderResults() {
@@ -145,6 +166,7 @@ function renderResults() {
     row.querySelector("select").value = result.decision;
     row.querySelector("select").addEventListener("change", (event) => {
       result.decision = event.target.value;
+      saveDecision(result).catch((error) => setStatus("error", error.message || "Decision save failed"));
       renderExport();
     });
     row.addEventListener("click", (event) => {
@@ -157,6 +179,49 @@ function renderResults() {
 
   renderEvidence();
   renderExport();
+}
+
+function mapRunResults(run) {
+  const profilesById = new Map(run.profiles.map((profile) => [profile.candidate_id, profile]));
+  const evaluationsById = new Map(run.evaluations.map((evaluation) => [evaluation.candidate_id, evaluation]));
+  const ranked = run.recommendation?.ranked_candidates || [];
+  const rows = ranked.length
+    ? ranked
+    : run.evaluations.map((evaluation, index) => ({
+        rank: index + 1,
+        candidate_id: evaluation.candidate_id,
+        label: profilesById.get(evaluation.candidate_id)?.label || evaluation.candidate_id,
+        fit_score: evaluation.fit_score,
+        confidence: evaluation.confidence,
+        missing_information: evaluation.gaps,
+        interview_prompts: evaluation.follow_up_questions
+      }));
+
+  return rows.map((candidate) => {
+    const profile = profilesById.get(candidate.candidate_id);
+    const evaluation = evaluationsById.get(candidate.candidate_id);
+    return {
+      id: candidate.candidate_id,
+      label: candidate.label,
+      rank: candidate.rank,
+      fitScore: candidate.fit_score,
+      confidence: candidate.confidence,
+      strengths: evaluation?.strengths || [],
+      gaps: candidate.missing_information || evaluation?.gaps || [],
+      risks: evaluation?.risks || [],
+      evidence: (profile?.evidence || []).map((item) => item.snippet),
+      interviewPrompts: candidate.interview_prompts || evaluation?.follow_up_questions || [],
+      decision: "needs_more_information"
+    };
+  });
+}
+
+async function renderServerExport() {
+  if (!state.runId) {
+    renderExport();
+    return;
+  }
+  exportOutput.value = await requestText(`/runs/${state.runId}/export?format=markdown`);
 }
 
 function renderEvidence() {
@@ -234,6 +299,51 @@ async function copyExport() {
   if (!exportOutput.value) return;
   await navigator.clipboard.writeText(exportOutput.value);
   setStatus("complete", "Export copied");
+}
+
+async function saveDecision(result) {
+  if (!state.runId) return;
+  await requestJson(`/runs/${state.runId}/decisions`, {
+    method: "POST",
+    body: {
+      decisions: [{ candidate_id: result.id, label: result.decision }]
+    }
+  });
+  setStatus("complete", "Decision saved");
+}
+
+async function requestJson(path, options = {}) {
+  const response = await fetch(`${state.apiBaseUrl}${path}`, {
+    method: options.method || "GET",
+    headers: { "Content-Type": "application/json" },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+async function requestText(path) {
+  const response = await fetch(`${state.apiBaseUrl}${path}`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.text();
+}
+
+async function readApiError(response) {
+  try {
+    const payload = await response.json();
+    return payload.message || `API request failed with ${response.status}`;
+  } catch {
+    return `API request failed with ${response.status}`;
+  }
+}
+
+function formatStatus(status) {
+  const text = status.replaceAll("_", " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function escapeHtml(value) {

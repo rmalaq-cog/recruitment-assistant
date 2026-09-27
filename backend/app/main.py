@@ -4,6 +4,7 @@ from functools import lru_cache
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .config import Settings, get_settings
@@ -24,6 +25,14 @@ from .storage import SQLiteStore
 
 
 app = FastAPI(title="Recruitment Assistant API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:4173", "http://127.0.0.1:4173", "null"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 @lru_cache

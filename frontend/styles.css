@@ -86,6 +86,16 @@ h2 {
   background: rgba(251, 251, 247, 0.86);
 }
 
+.api-strip {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 18px;
+}
+
+.api-strip label {
+  width: min(360px, 100%);
+}
+
 .status-dot {
   width: 10px;
   height: 10px;
@@ -250,6 +260,11 @@ select:focus {
   padding: 0 18px;
   background: var(--accent);
   color: #ffffff;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 .secondary-button {

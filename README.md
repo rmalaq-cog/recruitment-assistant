@@ -2,7 +2,26 @@
 
 A human-in-the-loop recruitment assistant built with a CrewAI-style multi-agent workflow. The application helps recruiters turn job requirements and candidate materials into structured candidate evaluations, ranked recommendations, interview focus areas, and auditable shortlist outputs.
 
-This repository is currently in the AAMAD Define phase. Product context lives under `project-context/1.define/`, with the PRD as the primary source for MVP scope and implementation decisions.
+This repository is currently Build-phase complete for the local MVP. Product and architecture context lives under `project-context/1.define/`, and Build implementation notes live under `project-context/2.build/`.
+
+## Current Status
+
+Build phase is complete for the local Recruitment Assistant MVP.
+
+Implemented capabilities include:
+
+- FastAPI backend with job intake, criteria update, analysis run, decision capture, health check, and Markdown/JSON export endpoints.
+- CrewAI-compatible runtime configuration with externalized agent and task YAML files.
+- Deterministic local analysis path for development and QA without live LLM credentials.
+- SQLite persistence for jobs, runs, decisions, and audit-oriented workflow data.
+- Static recruiter workbench frontend connected to the backend API.
+- Browser-validated end-to-end flow from role intake through candidate ranking and export.
+
+Known MVP limits:
+
+- Candidate materials are pasted as text; PDF/DOCX upload parsing is declared but not wired into an upload endpoint yet.
+- Live CrewAI kickoff is scaffolded but not enabled by default until provider credentials and prompt-trace policy are finalized.
+- Authentication, authorization, background queues, encrypted shared storage, and production deployment hardening remain delivery or post-MVP work.
 
 ## Project Overview
 
@@ -47,7 +66,17 @@ Expected value includes:
 
 ## Application Architecture Overview
 
-The target runtime for the application is CrewAI. The MVP should use a sequential workflow for reproducibility, testability, and auditability. Agent and task definitions should be externalized during Build according to the CrewAI adapter guidance.
+The target runtime for the application is CrewAI, selected with `AAMAD_TARGET_RUNTIME=crewai`. The MVP uses a FastAPI backend, a dependency-free static frontend, SQLite local storage, and CrewAI-compatible agent/task configuration. The current API executes a deterministic local analysis service by default so the app can run reliably in local development and QA without model-provider credentials.
+
+### Runtime Components
+
+| Component | Location | Responsibility |
+| --- | --- | --- |
+| Frontend workbench | `frontend/index.html`, `frontend/app.js`, `frontend/styles.css` | Captures role intake and candidate text, calls the backend API, renders ranked results, saves decisions, and displays export output. |
+| Backend API | `backend/app/main.py` | Exposes health, job, criteria, analysis run, decision, and export endpoints. |
+| Workflow service | `backend/app/services.py` | Performs deterministic local candidate extraction, rubric matching, guardrail checks, ranking, and export generation. |
+| Storage | `backend/app/storage.py`, `storage/recruitment_assistant.db` | Persists jobs, runs, decisions, and audit data in SQLite. |
+| CrewAI configuration | `backend/app/crew/` | Defines CrewAI factory plus externalized agents and tasks for the future live runtime path. |
 
 ### Application Agents
 
@@ -81,10 +110,68 @@ The system must preserve source evidence, label AI recommendations clearly, and 
 
 - Python 3.9 or newer.
 - AAMAD installed for Define/Build workflow support.
-- CrewAI for the future application runtime.
+- Backend Python dependencies from `backend/requirements.txt`.
 - VS Code with GitHub Copilot if following the initialized IDE workflow.
 
-### Current Repository Setup
+### Environment Setup
+
+From the `recruitment-assistant` directory, create a local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Ensure the runtime target is set to CrewAI:
+
+```bash
+export AAMAD_TARGET_RUNTIME=crewai
+```
+
+Or keep it in `.env`:
+
+```env
+AAMAD_TARGET_RUNTIME=crewai
+```
+
+Install backend dependencies from the repository root virtual environment or your selected Python environment:
+
+```bash
+../.venv/bin/python -m pip install -r backend/requirements.txt
+```
+
+The local MVP can run without `OPENAI_API_KEY` because the backend uses deterministic analysis by default. Add provider credentials only when enabling the live CrewAI path.
+
+### Run the Backend
+
+From `recruitment-assistant`, start the FastAPI API:
+
+```bash
+AAMAD_TARGET_RUNTIME=crewai ../.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+Check the API health endpoint:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### Run the Frontend
+
+The frontend is static HTML/CSS/JS. Serve it locally from `recruitment-assistant`:
+
+```bash
+../.venv/bin/python -m http.server 4173 --directory frontend
+```
+
+Open the workbench at:
+
+```text
+http://localhost:4173/
+```
+
+The frontend defaults to `http://localhost:8000` as the backend API base URL. If needed, edit the API URL field in the workbench; the value is persisted in browser local storage.
+
+### AAMAD Repository Setup
 
 This repository has already been initialized with AAMAD for VS Code:
 
@@ -92,24 +179,26 @@ This repository has already been initialized with AAMAD for VS Code:
 aamad init --ide vscode
 ```
 
-Define-phase artifacts are available at:
+Define and Build artifacts are available at:
 
 - `project-context/1.define/mrd.md`
 - `project-context/1.define/prd.md`
+- `project-context/1.define/sad.md`
+- `project-context/2.build/backend.md`
+- `project-context/2.build/frontend.md`
+- `project-context/2.build/integration.md`
+- `project-context/2.build/qa.md`
 
-### Validate Define Artifacts
+### Validate AAMAD Artifacts
 
 From this project directory, run:
 
 ```bash
 ../.venv/bin/aamad validate --phase define
+../.venv/bin/aamad validate --phase build
 ```
 
-At the current stage, validation may report that `project-context/1.define/sad.md` is missing. That is expected until the architecture step is completed by `@system.arch`.
-
-### Build Status
-
-Application code has not been scaffolded yet. The next major step is architecture definition, followed by backend, frontend, integration, QA, and delivery work.
+Build validation depends on the local AAMAD quality gates and may report documentation or delivery-phase gaps that are tracked separately from the completed local MVP implementation.
 
 ## Project Structure
 
@@ -118,19 +207,33 @@ recruitment-assistant/
 ├── .cursor/                    # Shared AAMAD templates, prompts, rules, and agent definitions
 ├── .github/                    # VS Code / GitHub Copilot agents, prompts, and instructions
 ├── .vscode/                    # Workspace settings
+├── backend/
+│   ├── app/
+│   │   ├── main.py             # FastAPI application and API routes
+│   │   ├── services.py         # Recruitment analysis workflow service
+│   │   ├── storage.py          # SQLite persistence
+│   │   ├── guardrails.py       # Compliance-sensitive review helpers
+│   │   └── crew/               # CrewAI factory and YAML agent/task config
+│   └── requirements.txt        # Backend dependencies
+├── frontend/
+│   ├── index.html              # Recruiter workbench UI
+│   ├── app.js                  # API integration and UI behavior
+│   └── styles.css              # Workbench styling
 ├── project-context/
 │   ├── 1.define/
 │   │   ├── mrd.md              # Market Research Document
-│   │   └── prd.md              # Product Requirements Document
-│   ├── 2.build/                # Build-phase artifacts to be produced later
+│   │   ├── prd.md              # Product Requirements Document
+│   │   └── sad.md              # Solution Architecture Document
+│   ├── 2.build/                # Build-phase implementation notes and QA artifacts
 │   └── 3.deliver/              # Delivery artifacts to be produced later
+├── storage/                    # Local SQLite and CrewAI storage directories
 ├── AGENTS.md                   # AAMAD persona index and workflow overview
 ├── CHECKLIST.md                # AAMAD execution checklist
 ├── README.md                   # Project README
 └── aamad.config.example.yml    # Example AAMAD configuration
 ```
 
-Planned implementation structure will be defined in the SAD. Expected future areas include a CrewAI backend, recruiter workbench frontend, API integration layer, tests, and deployment documentation.
+Delivery packaging, deployment documentation, and user-guide artifacts will be added under `project-context/3.deliver/` in the next phase.
 
 ## Success Metrics
 
@@ -156,14 +259,11 @@ Candidate materials are sensitive personal data. The implementation must:
 
 ## Next Steps for Contributors
 
-1. Run `@system.arch` to create `project-context/1.define/sad.md` from the PRD.
-2. Define evaluation criteria for accuracy, latency, safety, privacy, cost, and recruiter usefulness.
-3. Scaffold the CrewAI backend using sequential agent/task configuration.
-4. Build the recruiter workbench UI for job intake, candidate upload or paste, analysis status, comparison, review, and export.
-5. Connect frontend and backend through a minimal API contract.
-6. Add test data with anonymized or synthetic candidate profiles.
-7. Validate the MVP with QA, security review, and AAMAD phase validation.
-8. Prepare deployment and user-guide artifacts under `project-context/3.deliver/`.
+1. Run the security review for the completed local MVP.
+2. Decide when to enable live CrewAI kickoff and define provider credential plus prompt-trace storage policy.
+3. Add upload parsing endpoints for PDF/DOCX candidate materials if required for pilot use.
+4. Prepare deployment and user-guide artifacts under `project-context/3.deliver/`.
+5. Re-run AAMAD validation before delivery handoff.
 
 ## Source of Truth
 
