@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     crewai_storage_dir: Path = Field(default=Path("./storage/crewai"), alias="CREWAI_STORAGE_DIR")
     max_candidates_per_run: int = Field(default=10, alias="MAX_CANDIDATES_PER_RUN")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    crewai_tracing: bool = Field(default=False, alias="CREWAI_TRACING")
     crewai_max_iter: int = Field(default=8, alias="CREWAI_MAX_ITER")
     crewai_max_rpm: int = Field(default=30, alias="CREWAI_MAX_RPM")
     crewai_max_execution_time: int = Field(default=120, alias="CREWAI_MAX_EXECUTION_TIME")

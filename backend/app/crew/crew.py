@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import inspect
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from backend.app.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class RecruitmentCrewFactory:
@@ -51,11 +56,19 @@ class RecruitmentCrewFactory:
             context=[research_task, evaluation_task],
         )
 
-        return Crew(
-            agents=[researcher, evaluator, recommender],
-            tasks=[research_task, evaluation_task, recommendation_task],
-            process=Process.sequential,
-            memory=False,
-            max_rpm=self.settings.crewai_max_rpm,
-            verbose=False,
-        )
+        crew_kwargs = {
+            "agents": [researcher, evaluator, recommender],
+            "tasks": [research_task, evaluation_task, recommendation_task],
+            "process": Process.sequential,
+            "memory": False,
+            "max_rpm": self.settings.crewai_max_rpm,
+            "verbose": False,
+        }
+        if self.settings.crewai_tracing:
+            if "tracing" in inspect.signature(Crew).parameters:
+                crew_kwargs["tracing"] = True
+                logger.info("crewai_tracing_enabled")
+            else:
+                logger.warning("crewai_tracing_requested_but_unsupported")
+        logger.info("crewai_application_crew_built agent_count=%s task_count=%s tracing=%s", 3, 3, self.settings.crewai_tracing)
+        return Crew(**crew_kwargs)

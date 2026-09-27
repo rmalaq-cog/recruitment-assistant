@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -26,6 +27,9 @@ from .models import (
     SourceReference,
 )
 from .storage import SQLiteStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class RecruitmentService:
@@ -72,54 +76,89 @@ class RecruitmentService:
     def run_analysis(self, request: AnalysisRunRequest) -> AnalysisRunResponse | None:
         job_payload = self.store.get_job(request.job_id)
         if not job_payload:
+            logger.warning("application_crew_not_started reason=job_not_found job_id=%s", request.job_id)
             return None
         if len(request.candidates) > self.settings.max_candidates_per_run:
             msg = f"A run supports at most {self.settings.max_candidates_per_run} candidates."
+            logger.warning(
+                "application_crew_rejected reason=max_candidates_exceeded job_id=%s candidate_count=%s max_candidates=%s",
+                request.job_id,
+                len(request.candidates),
+                self.settings.max_candidates_per_run,
+            )
             raise ValueError(msg)
 
         job = JobRecord.model_validate(job_payload)
         now = datetime.now(UTC)
         run_id = uuid4().hex
-        profiles = [self._research_candidate(candidate) for candidate in request.candidates]
-        evaluations = [self._evaluate_candidate(job.criteria, profile) for profile in profiles]
-        guardrail = review_outputs(profiles, evaluations)
-
-        recommendation = None
-        status = RunStatus.COMPLETED
-        errors: list[str] = []
-        if guardrail.passed:
-            recommendation = self._recommend(profiles, evaluations, guardrail)
-        else:
-            status = RunStatus.FAILED
-            errors.extend(guardrail.findings)
-
-        response = AnalysisRunResponse(
-            run_id=run_id,
-            job_id=job.id,
-            status=status,
-            progress_phase=status,
-            candidate_count=len(request.candidates),
-            created_at=now,
-            updated_at=datetime.now(UTC),
-            warnings=[],
-            profiles=profiles,
-            evaluations=evaluations,
-            recommendation=recommendation,
-            errors=errors,
-        )
-        self.store.save_run(run_id, job.id, response.model_dump(mode="json"))
-        self.store.audit(
-            "analysis_run_completed",
+        logger.info(
+            "application_crew_started run_id=%s job_id=%s candidate_count=%s runtime=%s model=%s tracing=%s",
             run_id,
-            {
-                "runtime": self.settings.aamad_target_runtime,
-                "model": self.settings.model_name,
-                "temperature": self.settings.crewai_temperature,
-                "max_tokens": self.settings.crewai_max_tokens,
-                "guardrail_passed": guardrail.passed,
-            },
+            job.id,
+            len(request.candidates),
+            self.settings.aamad_target_runtime,
+            self.settings.model_name,
+            self.settings.crewai_tracing,
         )
-        return response
+        try:
+            logger.info("application_crew_phase_started run_id=%s phase=research_candidates", run_id)
+            profiles = [self._research_candidate(candidate) for candidate in request.candidates]
+            logger.info("application_crew_phase_completed run_id=%s phase=research_candidates", run_id)
+            logger.info("application_crew_phase_started run_id=%s phase=evaluate_candidates", run_id)
+            evaluations = [self._evaluate_candidate(job.criteria, profile) for profile in profiles]
+            logger.info("application_crew_phase_completed run_id=%s phase=evaluate_candidates", run_id)
+            guardrail = review_outputs(profiles, evaluations)
+
+            recommendation = None
+            status = RunStatus.COMPLETED
+            errors: list[str] = []
+            if guardrail.passed:
+                logger.info("application_crew_phase_started run_id=%s phase=recommend_shortlist", run_id)
+                recommendation = self._recommend(profiles, evaluations, guardrail)
+                logger.info("application_crew_phase_completed run_id=%s phase=recommend_shortlist", run_id)
+            else:
+                status = RunStatus.FAILED
+                errors.extend(guardrail.findings)
+                logger.warning("application_crew_guardrail_failed run_id=%s finding_count=%s", run_id, len(guardrail.findings))
+
+            response = AnalysisRunResponse(
+                run_id=run_id,
+                job_id=job.id,
+                status=status,
+                progress_phase=status,
+                candidate_count=len(request.candidates),
+                created_at=now,
+                updated_at=datetime.now(UTC),
+                warnings=[],
+                profiles=profiles,
+                evaluations=evaluations,
+                recommendation=recommendation,
+                errors=errors,
+            )
+            self.store.save_run(run_id, job.id, response.model_dump(mode="json"))
+            self.store.audit(
+                "analysis_run_completed",
+                run_id,
+                {
+                    "runtime": self.settings.aamad_target_runtime,
+                    "model": self.settings.model_name,
+                    "temperature": self.settings.crewai_temperature,
+                    "max_tokens": self.settings.crewai_max_tokens,
+                    "guardrail_passed": guardrail.passed,
+                },
+            )
+            logger.info(
+                "application_crew_completed run_id=%s job_id=%s status=%s candidate_count=%s guardrail_passed=%s",
+                run_id,
+                job.id,
+                status.value,
+                len(request.candidates),
+                guardrail.passed,
+            )
+            return response
+        except Exception:
+            logger.exception("application_crew_failed run_id=%s job_id=%s", run_id, job.id)
+            raise
 
     def get_run(self, run_id: str) -> AnalysisRunResponse | None:
         payload = self.store.get_run(run_id)
