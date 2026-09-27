@@ -79,6 +79,7 @@ Reference `.env.example` for keys only. Do not commit secret values.
 | `CREWAI_STORAGE_DIR` | Yes | `./storage/crewai` | CrewAI runtime storage directory. |
 | `MAX_CANDIDATES_PER_RUN` | Yes | `10` | MVP batch-size limit. |
 | `LOG_LEVEL` | No | `INFO` | Backend logging verbosity. |
+| `CREWAI_TRACING` | No | `false` | Enables CrewAI tracing for the Application Crew when supported by the installed CrewAI version. |
 | `CREWAI_MAX_ITER` | No | `8` | Agent iteration budget for live CrewAI path. |
 | `CREWAI_MAX_RPM` | No | `30` | Provider request-rate budget for live CrewAI path. |
 | `CREWAI_MAX_EXECUTION_TIME` | No | `120` | Agent execution-time budget in seconds. |
@@ -153,14 +154,52 @@ This Tier-0 package has no migration system. Rollback is source-controlled and d
 - Do not process real candidate data in the Tier-0 package unless the operator has an approved privacy basis and accepts the documented MVP risks.
 - Do not add provider credentials directly to committed Compose files. Use local overrides or a deployment secret manager for live model execution.
 
-## Monitoring / Logging Overview
+## Monitoring & Observability
 
-- Health: `/health` reports service status, runtime selection, SQLite availability, and whether model credentials are configured without exposing secrets.
-- Persistence: SQLite stores jobs, analysis runs, review decisions, and audit events.
-- Logs: Uvicorn and FastAPI emit process/application logs to stdout/stderr. Configure verbosity with `LOG_LEVEL`.
-- Audit: backend storage records workflow events such as job creation, criteria update, run creation, guardrail status, decisions, and exports where implemented.
-- Redaction requirement: logs and delivery artifacts must not include API keys or unnecessary raw candidate personal data.
-- Deferred monitoring: centralized metrics, APM, alerting, distributed tracing, and retention dashboards are future pilot work.
+### What to Monitor
+
+- Service health: `GET /health` reports service status, runtime selection, SQLite availability, and whether model credentials are configured without exposing secret values.
+- API traffic: every request and response is logged with method, path, status code, duration in milliseconds, and an `x-correlation-id` response header.
+- Application Crew execution: each analysis run logs start, deterministic crew phases (`research_candidates`, `evaluate_candidates`, `recommend_shortlist`), completion, guardrail failure, and unhandled execution errors.
+- Errors and exceptions: HTTP exceptions are logged at warning level; unexpected exceptions are logged with stack traces and returned as redacted `500` responses with a correlation ID.
+- Persistence/audit health: SQLite stores jobs, analysis runs, review decisions, and audit events such as job creation, criteria update, run completion, decisions, and exports.
+- Data-protection signals: monitor logs for unexpected raw candidate text or secrets. Application logs intentionally record IDs, counts, timings, statuses, and configuration booleans rather than API keys or candidate source content.
+
+### Log Levels and Storage
+
+- Configure backend verbosity with `LOG_LEVEL`. Recommended local/demo value is `INFO`; use `DEBUG` only for short troubleshooting windows; use `WARNING` or `ERROR` for quieter demos.
+- Local Uvicorn logs are written to the backend process stdout/stderr. If launched from a terminal, they remain in that terminal scrollback or any shell redirection configured by the operator.
+- Docker Compose logs are written to container stdout/stderr and are viewable with:
+
+```bash
+cd recruitment-assistant
+docker compose logs -f backend
+```
+
+- Persistent workflow audit events are stored in the SQLite database configured by `DATABASE_URL`, under the storage path configured by `STORAGE_DIR` or the Docker volume `recruitment-assistant_recruitment-storage`.
+- This Tier-0 package does not ship log rotation, centralized log aggregation, metrics scraping, alerting, or APM. Add those controls before a shared pilot or production deployment.
+
+### CrewAI Tracing
+
+CrewAI tracing is optional for the local MVP and should be enabled only when live CrewAI/provider execution is intentionally being evaluated.
+
+1. Authenticate with CrewAI from the environment that will run the backend:
+
+```bash
+crewai login
+```
+
+2. Enable tracing in the backend environment:
+
+```bash
+CREWAI_TRACING=true
+```
+
+3. Start the backend normally. When the installed CrewAI version supports `Crew(..., tracing=True)`, the Application Crew factory enables tracing and logs `crewai_tracing_enabled`. If the installed version does not expose that constructor option, the app continues without tracing and logs `crewai_tracing_requested_but_unsupported`.
+
+4. View traces in the CrewAI dashboard using the account authenticated by `crewai login`. Filter by recent runs and compare dashboard timestamps with backend log entries for `application_crew_started` and `application_crew_completed`.
+
+Redaction still applies when tracing is enabled: do not send real candidate data to a provider or external dashboard unless the target environment has approved privacy, retention, access-control, and security controls.
 
 ## Troubleshooting
 
